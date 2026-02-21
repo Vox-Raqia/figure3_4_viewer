@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Figure 3.4 Deep Zoom Viewer</title>
+  <style>
+    :root {
+      --bar-bg: rgba(12, 20, 33, 0.85);
+      --bar-border: rgba(166, 182, 204, 0.28);
+      --btn-bg: rgba(15, 28, 47, 0.72);
+      --btn-border: rgba(130, 155, 187, 0.35);
+      --btn-active: rgba(34, 98, 198, 0.88);
+      --btn-hover: rgba(45, 70, 105, 0.82);
+      --text: #e8eef8;
+      --muted: #a8b8cc;
+      --popup-bg: rgba(8, 16, 28, 0.95);
+      --popup-border: rgba(140, 165, 200, 0.38);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #060e1a;
+      font-family: "Segoe UI", "Arial", sans-serif;
+    }
+
+    #viewer {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #overlayCanvas {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9988;
+    }
+
+    /* Minimal Toolbar */
+    .toolbar {
+      position: fixed;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      padding: 5px 7px;
+      border-radius: 8px;
+      border: 1px solid var(--bar-border);
+      background: var(--bar-bg);
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
+    }
+
+    .tool-btn {
+      border: 1px solid var(--btn-border);
+      background: var(--btn-bg);
+      color: var(--text);
+      height: 28px;
+      min-width: 28px;
+      border-radius: 6px;
+      padding: 0 6px;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .tool-btn:hover {
+      background: var(--btn-hover);
+      border-color: rgba(150, 175, 210, 0.5);
+    }
+
+    .tool-btn.active {
+      background: var(--btn-active);
+      border-color: rgba(120, 175, 255, 0.7);
+      color: #fff;
+    }
+
+    .tool-divider {
+      width: 1px;
+      height: 18px;
+      background: rgba(173, 194, 222, 0.22);
+      margin: 0 3px;
+    }
+
+    /* Layer button with hover opacity slider */
+    .layer-control {
+      position: relative;
+      display: inline-flex;
+    }
+
+    .layer-btn {
+      position: relative;
+      overflow: visible;
+    }
+
+    .layer-btn svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    /* Opacity popup - appears on hover */
+    .opacity-popup {
+      position: absolute;
+      top: 34px;
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: 140px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--popup-border);
+      background: var(--popup-bg);
+      color: var(--muted);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s, visibility 0.2s;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
+      font-size: 11px;
+      z-index: 10001;
+    }
+
+    .layer-control:hover .opacity-popup,
+    .layer-control:focus-within .opacity-popup {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .opacity-popup label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .opacity-popup input[type="range"] {
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(100, 130, 170, 0.3);
+      outline: none;
+      -webkit-appearance: none;
+      cursor: pointer;
+    }
+
+    .opacity-popup input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #4a9eff;
+      border: 2px solid #fff;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+
+    .opacity-popup input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #4a9eff;
+      border: 2px solid #fff;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+
+    .opacity-value {
+      text-align: right;
+      margin-top: 4px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    /* Advanced flyout menu */
+    .advanced-control {
+      position: relative;
+    }
+
+    .advanced-popup {
+      position: absolute;
+      top: 34px;
+      right: 0;
+      min-width: 160px;
+      padding: 6px 0;
+      border-radius: 8px;
+      border: 1px solid var(--popup-border);
+      background: var(--popup-bg);
+      color: var(--text);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s, visibility 0.2s;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
+      font-size: 12px;
+      z-index: 10001;
+    }
+
+    .advanced-control:hover .advanced-popup,
+    .advanced-control:focus-within .advanced-popup {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .advanced-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .advanced-item:hover {
+      background: rgba(60, 100, 160, 0.35);
+    }
+
+    .advanced-item svg {
+      width: 14px;
+      height: 14px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    /* Status display - minimal */
+    .status {
+      position: fixed;
+      left: 10px;
+      bottom: 10px;
+      z-index: 9999;
+      color: #c8d8ec;
+      border: 1px solid rgba(160, 180, 210, 0.28);
+      background: rgba(9, 16, 27, 0.78);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      white-space: pre-line;
+      backdrop-filter: blur(6px);
+      max-width: min(50vw, 400px);
+    }
+
+    .status-layer {
+      color: #7ab8ff;
+      font-weight: 500;
+    }
+
+    .status-probe {
+      color: #ffd580;
+    }
+
+    /* Error display */
+    .error {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10002;
+      max-width: 90vw;
+      display: none;
+      color: #fee2e2;
+      background: rgba(127, 29, 29, 0.94);
+      border: 1px solid #fecaca;
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 700px) {
+      .toolbar {
+        gap: 3px;
+        padding: 4px 5px;
+      }
+
+      .tool-btn {
+        height: 26px;
+        min-width: 26px;
+        padding: 0 5px;
+        font-size: 11px;
+      }
+
+      .tool-btn svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .opacity-popup,
+      .advanced-popup {
+        min-width: 130px;
+        font-size: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewer"></div>
+  <canvas id="overlayCanvas"></canvas>
+
+  <!-- Minimal Toolbar -->
+  <div class="toolbar" aria-label="Viewer tools">
+    <!-- Zoom controls -->
+    <button class="tool-btn" id="zoomInBtn" title="Zoom in" aria-label="Zoom in">
+      <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+    <button class="tool-btn" id="zoomOutBtn" title="Zoom out" aria-label="Zoom out">
+      <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+    <button class="tool-btn" id="homeBtn" title="Reset view" aria-label="Reset view">
+      <svg viewBox="0 0 24 24"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
+    </button>
+    <button class="tool-btn" id="fullBtn" title="Fullscreen" aria-label="Fullscreen">
+      <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+    </button>
+
+    <div class="tool-divider"></div>
+
+    <!-- Layer toggles with hover opacity sliders -->
+    <div class="layer-control">
+      <button class="tool-btn layer-btn active" id="layerMapBtn" title="Map layer" aria-label="Map layer">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+      </button>
+      <div class="opacity-popup">
+        <label>Map Opacity</label>
+        <input type="range" id="mapOpacity" min="0" max="100" value="100">
+        <div class="opacity-value"><span id="mapOpacityValue">100</span>%</div>
+      </div>
+    </div>
+
+    <div class="layer-control">
+      <button class="tool-btn layer-btn" id="layerDatumBtn" title="Datum lines layer" aria-label="Datum layer">
+        <svg viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="opacity-popup">
+        <label>Datum Opacity</label>
+        <input type="range" id="datumOpacity" min="0" max="100" value="92">
+        <div class="opacity-value"><span id="datumOpacityValue">92</span>%</div>
+      </div>
+    </div>
+
+    <div class="layer-control">
+      <button class="tool-btn layer-btn" id="layerCurveBtn" title="Curve layer" aria-label="Curve layer">
+        <svg viewBox="0 0 24 24"><path d="M3 20 Q 12 4, 21 20"/></svg>
+      </button>
+      <div class="opacity-popup">
+        <label>Curve Opacity</label>
+        <input type="range" id="curveOpacity" min="0" max="100" value="92">
+        <div class="opacity-value"><span id="curveOpacityValue">92</span>%</div>
+      </div>
+    </div>
+
+    <div class="layer-control">
+      <button class="tool-btn layer-btn" id="layerAllBtn" title="Show all layers" aria-label="All layers">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="6" y="6" width="15" height="15" rx="2" opacity="0.7"/><rect x="9" y="9" width="12" height="12" rx="2" opacity="0.4"/></svg>
+      </button>
+      <div class="opacity-popup">
+        <label>All Overlays Opacity</label>
+        <input type="range" id="overlayOpacity" min="0" max="100" value="92">
+        <div class="opacity-value"><span id="overlayOpacityValue">92</span>%</div>
+      </div>
+    </div>
+
+    <div class="tool-divider"></div>
+
+    <!-- Split view toggle -->
+    <div class="layer-control">
+      <button class="tool-btn" id="splitModeBtn" title="Split view (Map vs All)" aria-label="Split view">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+      </button>
+      <div class="opacity-popup">
+        <label>Split Position</label>
+        <input type="range" id="splitSlider" min="0" max="100" value="50">
+        <div class="opacity-value"><span id="splitValue">50</span>%</div>
+      </div>
+    </div>
+
+    <!-- Confidence bands toggle -->
+    <button class="tool-btn active" id="bandToggleBtn" title="Confidence bands" aria-label="Confidence bands">
+      <svg viewBox="0 0 24 24"><path d="M4 12h16"/><path d="M4 8h16" opacity="0.5"/><path d="M4 16h16" opacity="0.5"/></svg>
+    </button>
+
+    <div class="tool-divider"></div>
+
+    <!-- Advanced menu with CSV export -->
+    <div class="advanced-control">
+      <button class="tool-btn" id="advancedBtn" title="Advanced options" aria-label="Advanced options">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+      </button>
+      <div class="advanced-popup">
+        <div class="advanced-item" id="downloadCsvBtn" title="Download checkpoint CSV">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export CSV Checkpoints
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status" id="statusLabel">
+    <span class="status-layer">Map Only</span>
+    <span class="status-probe"> · Probe: --</span>
+  </div>
+  <div class="error" id="errorBox"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/5.0.1/openseadragon.min.js"></script>
+  <script>
+    const MAX_MI = 1250;
+    // Coordinate fractions adjusted for full image width (6456px) vs map area (6400px + 28px offset)
+    const LEFT_FRAC = 207 / 6456;
+    const RIGHT_FRAC = 6248 / 6456;
+    const BLUE_Y_FRAC = 0.4509162304;
+
+    const LAYERS = {
+      all: "tiles/figure3_4_v1_0_all.dzi",
+      map: "tiles/figure3_4_v1_0_map.dzi",
+      datum: "tiles/figure3_4_v1_0_datum.dzi",
+      curve: "tiles/figure3_4_v1_0_curve.dzi"
+    };
+
+    // Layer state management
+    let selectedLayer = "map";
+    let mapItem = null;
+    let overlayItem = null;
+    let isSplit = false;
+    let bandsEnabled = true;
+    let lastProbe = "--";
+    let probeActive = true;
+
+    // Opacity values per layer
+    const opacities = {
+      map: 100,
+      datum: 92,
+      curve: 92,
+      overlay: 92
+    };
+
+    const viewer = OpenSeadragon({
+      id: "viewer",
+      prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/5.0.1/images/",
+      showNavigationControl: false,
+      showNavigator: true,
+      navigatorAutoFade: true,
+      animationTime: 0.8,
+      blendTime: 0.16,
+      zoomPerScroll: 1.25,
+      constrainDuringPan: true,
+      visibilityRatio: 0.8,
+      minZoomImageRatio: 0.8,
+      maxZoomPixelRatio: 2,
+      // Default view per XFDF Task 5 (MAGENTA annotation) - lower-center area
+      // Initial center positioned to show the curve/datum area
+      defaultZoomLevel: 0.9,
+      homeFillsViewer: false,
+      gestureSettingsMouse: { clickToZoom: false, dblClickToZoom: true, dragToPan: true, scrollToZoom: true },
+      gestureSettingsTouch: { pinchToZoom: true, flickEnabled: true, clickToZoom: false, dblClickToZoom: true, dragToPan: true }
+    });
+
+    const overlayCanvas = document.getElementById("overlayCanvas");
+    const ctx = overlayCanvas.getContext("2d");
+
+    function setError(msg) {
+      const box = document.getElementById("errorBox");
+      box.textContent = msg;
+      box.style.display = "block";
+    }
+
+    function clearError() {
+      document.getElementById("errorBox").style.display = "none";
+    }
+
+    function setActiveLayerButton(layer) {
+      const ids = ["layerAllBtn", "layerMapBtn", "layerDatumBtn", "layerCurveBtn"];
+      ids.forEach((id) => document.getElementById(id).classList.remove("active"));
+      const map = { all: "layerAllBtn", map: "layerMapBtn", datum: "layerDatumBtn", curve: "layerCurveBtn" };
+      const el = document.getElementById(map[layer]);
+      if (el) el.classList.add("active");
+    }
+
+    function currentOverlaySource() {
+      if (isSplit) return LAYERS.all;
+      if (selectedLayer === "map") return null;
+      return LAYERS[selectedLayer] || null;
+    }
+
+    function preserveView() {
+      if (!viewer.viewport) return null;
+      return {
+        center: viewer.viewport.getCenter(true),
+        zoom: viewer.viewport.getZoom(true)
+      };
+    }
+
+    function restoreView(state) {
+      if (!state || !viewer.viewport) return;
+      viewer.viewport.zoomTo(state.zoom, null, true);
+      viewer.viewport.panTo(state.center, true);
+    }
+
+    function applyOpacities() {
+      if (mapItem) {
+        const mapOpacity = Number(document.getElementById("mapOpacity").value) / 100;
+        mapItem.setOpacity(mapOpacity);
+      }
+      if (overlayItem) {
+        const overlayOpacity = Number(document.getElementById("overlayOpacity").value) / 100;
+        overlayItem.setOpacity(overlayOpacity);
+      }
+    }
+
+    function applySplitClips() {
+      if (!mapItem || !overlayItem) return;
+      mapItem.setClip(null);
+      overlayItem.setClip(null);
+
+      if (!isSplit) return;
+      const splitPct = Number(document.getElementById("splitSlider").value) / 100;
+      const size = mapItem.getContentSize();
+      const splitX = size.x * splitPct;
+
+      mapItem.setClip(new OpenSeadragon.Rect(0, 0, splitX, size.y));
+      overlayItem.setClip(new OpenSeadragon.Rect(splitX, 0, size.x - splitX, size.y));
+    }
+
+    function resizeOverlayCanvas() {
+      overlayCanvas.width = window.innerWidth;
+      overlayCanvas.height = window.innerHeight;
+    }
+
+    function drawConfidenceBands() {
+      ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      if (!bandsEnabled || !mapItem) return;
+
+      const imgSize = mapItem.getContentSize();
+      const yBlue = imgSize.y * BLUE_Y_FRAC;
+      const xLeft = imgSize.x * LEFT_FRAC;
+      const xRight = imgSize.x * RIGHT_FRAC;
+
+      const ptL = mapItem.imageToViewportCoordinates(new OpenSeadragon.Point(xLeft, yBlue));
+      const ptR = mapItem.imageToViewportCoordinates(new OpenSeadragon.Point(xRight, yBlue));
+      const pxL = viewer.viewport.pixelFromPoint(ptL, true);
+      const pxR = viewer.viewport.pixelFromPoint(ptR, true);
+
+      const line = (dy, color, width) => {
+        ctx.beginPath();
+        ctx.moveTo(pxL.x, pxL.y + dy);
+        ctx.lineTo(pxR.x, pxR.y + dy);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.stroke();
+      };
+
+      line(-5, "rgba(255,165,0,0.52)", 1.4);
+      line(5, "rgba(255,165,0,0.52)", 1.4);
+      line(-2, "rgba(255,255,0,0.74)", 1.2);
+      line(2, "rgba(255,255,0,0.74)", 1.2);
+    }
+
+    function updateStatus(probeValue = lastProbe) {
+      const labelMap = { all: "All Layers", map: "Map Only", datum: "Datum Only", curve: "Curve Only" };
+      const layerLabel = isSplit ? "Split: Map vs All" : (labelMap[selectedLayer] || "Map Only");
+      const statusLabel = document.getElementById("statusLabel");
+      statusLabel.innerHTML = `<span class="status-layer">${layerLabel}</span><span class="status-probe"> · Probe: ${probeValue}</span>`;
+    }
+
+    function probeFromPixel(pixelPoint) {
+      if (!probeActive || !mapItem || !viewer.viewport) return;
+      
+      try {
+        const vp = viewer.viewport.pointFromPixel(pixelPoint);
+        const ip = mapItem.viewportToImageCoordinates(vp);
+        const imgW = mapItem.getContentSize().x;
+        const xLeft = imgW * LEFT_FRAC;
+        const xRight = imgW * RIGHT_FRAC;
+
+        // Check if within the map bounds horizontally
+        if (ip.x < xLeft || ip.x > xRight) {
+          lastProbe = "-- (out of bounds)";
+          updateStatus(lastProbe);
+          return;
+        }
+
+        let miles = ((xRight - ip.x) / (xRight - xLeft)) * MAX_MI;
+        miles = Math.max(0, Math.min(MAX_MI, miles));
+        
+        // Drop formula: drop = (2/3) × d² (in feet, where d is in miles)
+        const ft = (2 / 3) * miles * miles;
+        lastProbe = `${miles.toFixed(1)} mi · ${ft.toFixed(0)} ft drop`;
+        updateStatus(lastProbe);
+      } catch (e) {
+        // Silently handle coordinate conversion errors
+        lastProbe = "--";
+        updateStatus(lastProbe);
+      }
+    }
+
+    async function loadWorld(layerKey) {
+      const viewState = preserveView();
+      selectedLayer = layerKey;
+      clearError();
+
+      viewer.world.removeAll();
+      mapItem = null;
+      overlayItem = null;
+
+      viewer.addTiledImage({
+        tileSource: LAYERS.map,
+        success: (ev1) => {
+          mapItem = ev1.item;
+          const overlaySource = currentOverlaySource();
+
+          if (!overlaySource) {
+            applyOpacities();
+            restoreView(viewState);
+            drawConfidenceBands();
+            updateStatus();
+            return;
+          }
+
+          viewer.addTiledImage({
+            tileSource: overlaySource,
+            x: 0,
+            y: 0,
+            width: 1,
+            success: (ev2) => {
+              overlayItem = ev2.item;
+              applyOpacities();
+              applySplitClips();
+              restoreView(viewState);
+              drawConfidenceBands();
+              updateStatus();
+            },
+            error: () => setError("Failed loading overlay DZI source.")
+          });
+        },
+        error: () => setError("Failed loading map DZI source.")
+      });
+
+      setActiveLayerButton(layerKey);
+    }
+
+    // Hover probe event handlers - using multiple methods for reliability
+    function setupProbeHandlers() {
+      // Method 1: OpenSeadragon canvas-move event
+      viewer.addHandler("canvas-move", (event) => {
+        if (event.position) {
+          probeFromPixel(event.position);
+        }
+      });
+
+      // Method 2: OpenSeadragon canvas-enter event
+      viewer.addHandler("canvas-enter", (event) => {
+        if (event.position) {
+          probeFromPixel(event.position);
+        }
+      });
+
+      // Method 3: Direct mousemove on viewer container (most reliable)
+      viewer.container.addEventListener("mousemove", (evt) => {
+        const rect = viewer.container.getBoundingClientRect();
+        const p = new OpenSeadragon.Point(evt.clientX - rect.left, evt.clientY - rect.top);
+        probeFromPixel(p);
+      });
+
+      // Method 4: Touch support
+      viewer.container.addEventListener("touchmove", (evt) => {
+        if (evt.touches.length > 0) {
+          const rect = viewer.container.getBoundingClientRect();
+          const touch = evt.touches[0];
+          const p = new OpenSeadragon.Point(touch.clientX - rect.left, touch.clientY - rect.top);
+          probeFromPixel(p);
+        }
+      });
+
+      // Clear probe when mouse leaves
+      viewer.container.addEventListener("mouseleave", () => {
+        lastProbe = "--";
+        updateStatus(lastProbe);
+      });
+    }
+
+    // Update opacity value displays
+    function setupOpacityDisplays() {
+      const opacityInputs = [
+        { input: "mapOpacity", display: "mapOpacityValue" },
+        { input: "datumOpacity", display: "datumOpacityValue" },
+        { input: "curveOpacity", display: "curveOpacityValue" },
+        { input: "overlayOpacity", display: "overlayOpacityValue" },
+        { input: "splitSlider", display: "splitValue" }
+      ];
+
+      opacityInputs.forEach(({ input, display }) => {
+        const inputEl = document.getElementById(input);
+        const displayEl = document.getElementById(display);
+        if (inputEl && displayEl) {
+          inputEl.addEventListener("input", () => {
+            displayEl.textContent = inputEl.value;
+          });
+        }
+      });
+    }
+
+    viewer.addHandler("animation", drawConfidenceBands);
+    viewer.addHandler("open", drawConfidenceBands);
+    window.addEventListener("resize", () => {
+      resizeOverlayCanvas();
+      drawConfidenceBands();
+    });
+
+    // Zoom controls
+    document.getElementById("zoomInBtn").addEventListener("click", () => viewer.viewport.zoomBy(1.2));
+    document.getElementById("zoomOutBtn").addEventListener("click", () => viewer.viewport.zoomBy(0.8));
+    document.getElementById("homeBtn").addEventListener("click", () => viewer.viewport.goHome(true));
+    document.getElementById("fullBtn").addEventListener("click", () => viewer.setFullScreen(!viewer.isFullPage()));
+
+    // Layer toggles
+    document.getElementById("layerAllBtn").addEventListener("click", () => loadWorld("all"));
+    document.getElementById("layerMapBtn").addEventListener("click", () => loadWorld("map"));
+    document.getElementById("layerDatumBtn").addEventListener("click", () => loadWorld("datum"));
+    document.getElementById("layerCurveBtn").addEventListener("click", () => loadWorld("curve"));
+
+    // Opacity controls
+    document.getElementById("mapOpacity").addEventListener("input", applyOpacities);
+    document.getElementById("overlayOpacity").addEventListener("input", applyOpacities);
+
+    // Split mode
+    document.getElementById("splitModeBtn").addEventListener("click", async () => {
+      isSplit = !isSplit;
+      document.getElementById("splitModeBtn").classList.toggle("active", isSplit);
+      await loadWorld(selectedLayer);
+    });
+
+    document.getElementById("splitSlider").addEventListener("input", () => {
+      applySplitClips();
+      drawConfidenceBands();
+    });
+
+    // Confidence bands toggle
+    document.getElementById("bandToggleBtn").addEventListener("click", () => {
+      bandsEnabled = !bandsEnabled;
+      document.getElementById("bandToggleBtn").classList.toggle("active", bandsEnabled);
+      drawConfidenceBands();
+    });
+
+    // CSV Export (in Advanced menu)
+    document.getElementById("downloadCsvBtn").addEventListener("click", () => {
+      const checkpoints = [];
+      for (let m = 100; m <= 1200; m += 100) checkpoints.push(m);
+      checkpoints.push(1250);
+
+      let csv = "miles,drop_feet,drop_miles\n";
+      checkpoints.forEach((m) => {
+        const ft = (2 / 3) * m * m;
+        const mi = ft / 5280;
+        csv += `${m},${ft.toFixed(3)},${mi.toFixed(6)}\n`;
+      });
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "figure3_4_checkpoints.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    viewer.addHandler("open-failed", () => setError("Failed to load one or more DZI layers. Verify tiles/figure3_4_v1_0_* files exist."));
+
+    // Initialize
+    resizeOverlayCanvas();
+    setupProbeHandlers();
+    setupOpacityDisplays();
+    loadWorld("map");
+  </script>
+</body>
+</html>
